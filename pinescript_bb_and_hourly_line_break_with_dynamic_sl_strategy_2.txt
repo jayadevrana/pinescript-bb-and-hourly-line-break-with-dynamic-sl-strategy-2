@@ -1,0 +1,110 @@
+//@version=5
+strategy("BB & Hourly Line Break with Dynamic SL", overlay=true, initial_capital=100000, currency=currency.USD)
+
+// === Bollinger Bands on current timeframe ===
+bbLength = input.int(20, "BB Length")
+bbMult   = input.float(2.0, "BB Multiplier")
+basis    = ta.sma(close, bbLength)
+dev      = bbMult * ta.stdev(close, bbLength)
+upperBB  = basis + dev
+lowerBB  = basis - dev
+
+// Plot Bollinger Bands for reference.
+plot(upperBB, color=color.blue, title="Upper Bollinger Band")
+plot(basis,   color=color.orange, title="Middle BB (Basis)")
+plot(lowerBB, color=color.blue, title="Lower Bollinger Band")
+
+// === Hourly "Line" Calculation ===
+// Function to compute the lower body (green: open, red: close)
+f_lowerBody(_open, _close) =>
+    _close >= _open ? _open : _close
+
+// Request hourly lower body using the higher timeframe.
+lb_hour = request.security(syminfo.tickerid, "60", f_lowerBody(open, close), barmerge.gaps_off, barmerge.lookahead_off)
+
+// Detect start of a new hourly candle.
+newHour = ta.change(time("60"))
+
+// Calculate the hourly line when consecutive hourly lower bodies differ by 5 points or less.
+var float lastLine = na 
+if newHour and not na(lb_hour[1])
+    if math.abs(lb_hour - lb_hour[1]) <= 5
+        lastLine := (lb_hour + lb_hour[1]) / 2.0
+        line.new(x1=bar_index, y1=lastLine, x2=bar_index + 1, y2=lastLine, extend=extend.right, color=color.blue, width=2)
+
+
+// Plot the hourly line for visual reference.
+plot(lastLine, color=color.green, title="Hourly Line")
+
+// === Entry Condition ===
+// We require that the price crosses above both the upper Bollinger Band and the hourly line,
+// and that the candle closes above both.
+entryCondition = (not na(lastLine) and 
+                 ta.crossover(close, upperBB) and 
+                 ta.crossover(close, lastLine)) or 
+                 (
+                 ta.crossover(close[1], upperBB) and 
+                 ta.crossover(close[1], lastLine)) 
+
+
+if entryCondition
+    strategy.entry("Long", strategy.long)
+
+target_1 = strategy.position_avg_price + input(20.0)
+target_2 = strategy.position_avg_price + input(40.0)
+initial_sl = strategy.position_avg_price - input(20.0)
+
+plot(strategy.position_size > 0 ? target_1 : na,style = plot.style_linebr)
+plot(strategy.position_size > 0 ? target_2 : na,style = plot.style_linebr)
+
+tgt1 = false
+tgt1 := tgt1[1]
+
+tgt2 = false
+tgt2 := tgt2[1]
+
+if strategy.position_size > 0 and high > target_1
+    tgt1 := true
+
+if strategy.position_size > 0 and high > target_2
+    tgt2 := true
+
+if tgt1 
+    initial_sl := basis
+
+if tgt1 and tgt2
+    initial_sl := upperBB
+
+plot(strategy.position_size > 0 ? initial_sl : na,style = plot.style_linebr,color = color.red)
+
+
+if strategy.position_size == 0
+    tgt1 := false
+    tgt2 := false
+
+strategy.exit("sl",'Long',stop = initial_sl)
+
+// // === Dynamic Stop Loss Logic ===
+// // When a trade is open, determine the stop loss level as follows:
+// // - Initial stop: lowerBB.
+// // - If price moves >=20 points above the entry, use the middle BB (basis).
+// // - If price moves >=40 points above the entry, use the upperBB.
+// dynamicStop = 0.00
+// dynamicStop := dynamicStop[1]
+
+
+// if strategy.position_size > 0
+//     float entryPrice = strategy.position_avg_price
+//     if close >= entryPrice + 40
+//         dynamicStop := upperBB
+//     else if close >= entryPrice + 20
+//         dynamicStop := basis
+//     else
+//         dynamicStop := strategy.position_avg_price - 20
+   
+//     // Update the exit order each bar with the current stop loss.
+//     if (open > dynamicStop and close < dynamicStop) or (close < dynamicStop)
+//         strategy.close_all()
+
+
+// plot(strategy.position_size ? dynamicStop : na,color = color.red,style = plot.style_linebr)
